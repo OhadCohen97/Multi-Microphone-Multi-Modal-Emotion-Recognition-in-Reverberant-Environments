@@ -67,6 +67,8 @@ Python 3.8.13 ('base')
 The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ```multimodal``` flag in ```config.py```.
 - 🔗 [Dataset & Pretrained Models](LINK_TO_DATA_MODELS)
 
+**Note** that the first work fine-tuned on diffrent amounts of samples and splits.
+
 Place datasets inside `data/` folder:
 ```bash
 MER/
@@ -119,12 +121,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
 ---
 
 ## 📊 Results
-| Model | RAVDESS (Clean) | RAVDESS (Reverberant) |
-|----------------------|--------|--------|
-| Single-Channel HTS-AT | 77.3% | 61.3% |
-| Multi-Channel HTS-AT (Sum PE) | 85.3% | 68.7% |
-| **Multi-Modal (HTS-AT + R(2+1)D)** | **90.0%** | **75.5%** |
 
+![results](images/results_mer.png)
 ---
 
 ## 🏆 Citation
