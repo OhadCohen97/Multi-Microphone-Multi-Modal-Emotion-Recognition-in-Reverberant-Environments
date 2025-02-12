@@ -1,6 +1,6 @@
 # Multi-Microphone & Multi-Modal Emotion Recognition in Reverberant Environments
 
-🚀 **Official repository for the paper:**  
+🔥 **Official repository for the paper:**  
 **"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"**  
 This work is an extension of our previous paper "Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer
 Architecture", incorporating multi-modal learning to further improve robustness.  
@@ -24,7 +24,7 @@ Human emotions are conveyed through **speech and facial expressions**, making **
 
 ---
 
-## 📊 Model Architecture
+## 📸 Model Architecture
 Our approach consists of **two main components**:
 1. **HTS-AT Transformer (Audio Modality)**:
    - Processes **multi-channel mel-spectrograms**
