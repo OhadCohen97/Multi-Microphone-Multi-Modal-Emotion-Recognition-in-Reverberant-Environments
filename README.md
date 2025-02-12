@@ -110,6 +110,11 @@ To evaluate the model, you must set the paths for the npy files. See in ```main.
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test_ace
 ```
+For single test on one npy file:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
+```
 
 ---
 
