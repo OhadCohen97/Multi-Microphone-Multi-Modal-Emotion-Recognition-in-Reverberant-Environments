@@ -19,7 +19,7 @@ Human emotions are conveyed through **speech and facial expressions**, making **
 ### 🔮 Key Features
 ✔️ **Multi-Microphone Audio Processing**: Robust against reverberation  
 ✔️ **Multi-Modal Learning**: Combines speech and facial cues  
-✔️ **Tested on RAVDESS with Real-World RIRs** (ACE Database)  
+✔️ **Tested on RAVDESS convolved with Real-World RIRs** (ACE Database)  
 ✔️ **Pretrained Models Available** for Fine-Tuning and testing
 
 ---
