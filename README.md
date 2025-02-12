@@ -66,7 +66,7 @@ Python 3.8.13 ('base')
 ### **2️⃣ Dataset Setup**
 
 
-The previous paper evaluated the model on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ```bash multimodal``` flag in ```bash config.py```.
+The previous paper evaluated the model on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ``` multimodal``` flag in ```config.py```.
 - **RAVDESS**: [Download Here](https://zenodo.org/record/1188976)
 - **ACE RIRs**: [Download Here](https://www.ace-challenge.org)
 
