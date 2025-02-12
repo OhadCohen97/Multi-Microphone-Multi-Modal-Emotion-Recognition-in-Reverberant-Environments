@@ -5,7 +5,7 @@
 This work is an extension of our previous paper "Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer
 Architecture", incorporating multi-modal learning to further improve robustness.  
 📄 [Read the Paper](https://arxiv.org/pdf/2409.09545)  
-🔗 [Dataset & Pretrained Models](LINK_TO_DATA_MODELS)
+
 
 ---
 
@@ -65,11 +65,16 @@ Python 3.8.13 ('base')
 
 ### **2️⃣ Dataset Setup**
 The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ``` multimodal``` flag in ```config.py```.
-- **RAVDESS**: [Download Here](https://zenodo.org/record/1188976)
+- 🔗 [Dataset & Pretrained Models](LINK_TO_DATA_MODELS)
 
 Place datasets inside `data/` folder:
 ```bash
-mkdir data && mv RAVDESS data/
+MER/
+│── RAVDESS/
+      │── data/
+            │── train.npy
+            │── val.npy
+            │── test.npy
 ```
 
 ---
