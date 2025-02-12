@@ -1,4 +1,4 @@
-# Multi-Microphone & Multi-Modal Emotion Recognition in Reverberant Environments
+# Multi-Microphone & Multi-Modal Emotion Recognition in Reverberant Environments - Submitted to EUSIPCO 2025
 
 🔥 **Official repository for the paper:**  
 **"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"**  
