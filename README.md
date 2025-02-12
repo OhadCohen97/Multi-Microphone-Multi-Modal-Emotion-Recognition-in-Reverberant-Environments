@@ -39,7 +39,7 @@ Our approach consists of **two main components**:
 
 | Multi-Modal Architecture | Multi-Microphone Audio | Video-Based Recognition |
 |----------------------|------------------|----------------------|
-| ![Model](images/multi-modal-architecture.png) | ![HTS-AT](images/hts-at-multi-mic.png) | ![R2+1D](images/video-model.png) |
+| ![Model](images/MER.png) | ![HTS-AT](images/audio.png) | ![R2+1D](images/video.png) |
 
 ---
 
