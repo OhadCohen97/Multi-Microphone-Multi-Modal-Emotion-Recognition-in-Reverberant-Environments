@@ -37,9 +37,9 @@ Our approach consists of **two main components**:
    - Late fusion via **concatenation of extracted embeddings**
    - Fully connected layers for final emotion classification
 
-| Multi-Modal Architecture | Multi-Microphone Audio | Video-Based Recognition |
+| Multi-channel Multi-modal Architecture | Multi-Microphone Audio | Video-Based Recognition |
 |----------------------|------------------|----------------------|
-| ![Model](images/MER.png) | ![HTS-AT](images/audio.png) | ![R2+1D](images/video.png) |
+| ![Model](images/MER.png) | ![The extended HTS-AT](images/audio.png) | ![R2+1D](images/video.png) |
 
 ---
 
