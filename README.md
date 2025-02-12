@@ -128,11 +128,11 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
 ## 🏆 Citation
 If you use this work, please cite:
 ```bibtex
-@inproceedings{cohen2025multimodal,
-  author    = {Ohad Cohen, Gershon Hazan, Sharon Gannot},
-  title     = {Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments},
-  booktitle = {ICASSP},
-  year      = {2025}
+@article{cohen2024multi,
+  title={Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environment},
+  author={Cohen, Ohad and Hazan, Gershon and Gannot, Sharon},
+  journal={arXiv preprint arXiv:2409.09545},
+  year={2024}
 }
 ```
 
