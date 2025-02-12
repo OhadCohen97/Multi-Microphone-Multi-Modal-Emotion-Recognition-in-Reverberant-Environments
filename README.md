@@ -64,7 +64,7 @@ Python 3.8.13 ('base')
 ---
 
 ### **2️⃣ Dataset Setup**
-The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ``` multimodal``` flag in ```config.py```.
+The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ```multimodal``` flag in ```config.py```.
 - 🔗 [Dataset & Pretrained Models](LINK_TO_DATA_MODELS)
 
 Place datasets inside `data/` folder:
@@ -81,16 +81,16 @@ MER/
 
 ### **3️⃣ Training & Evaluation**
 #### **Preprocess Data**
+For preprocess the data see the notebooks.
+#### **Fine-tune the Models**
+First, in ```config.py```, make sure you have the HTS-AT AudioSet pre-trained model and the path to it. Set the root path to the dataset you with to use.
+To train:
 ```bash
-python src/preprocess.py --dataset ravdess --rir_data ACE
-```
-#### **Train the Multi-Modal Model**
-```bash
-python train.py --dataset ravdess --epochs 150 --batch_size 64
+CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py train
 ```
 #### **Evaluate Performance**
 ```bash
-python evaluate.py --dataset ravdess --rir_data ACE
+CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
 ```
 
 ---
