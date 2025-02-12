@@ -46,22 +46,27 @@ Our approach consists of **two main components**:
 ## 🔧 Getting Started
 
 ### **1️⃣ Installation**
+The base way to run the code is with Docker Container.
+#### **Pull Docker Image**
+```bash
+docker pull ohadico97/mer:v1
+```
 #### **Clone the Repository**
 ```bash
 git clone https://github.com/yourusername/Multi-Modal-SER.git
 cd Multi-Modal-SER
 ```
-#### **Create a Virtual Environment & Install Dependencies**
+#### **Use the Virtual Environment**
 ```bash
-python -m venv env
-source env/bin/activate  # On Windows use `env\Scripts\activate`
-pip install -r requirements.txt
+Python 3.8.13 ('base')
 ```
 
 ---
 
 ### **2️⃣ Dataset Setup**
-This work is evaluated on the **RAVDESS dataset**, reverberated using **ACE RIRs**:
+
+
+The previous paper evaluated the model on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ```bash multimodal``` flag in ```bash config.py```.
 - **RAVDESS**: [Download Here](https://zenodo.org/record/1188976)
 - **ACE RIRs**: [Download Here](https://www.ace-challenge.org)
 
