@@ -51,6 +51,11 @@ The base way to run the code is with Docker Container.
 ```bash
 docker pull ohadico97/mer:v1
 ```
+After having the image, run:
+
+```bash
+docker run -it --gpus all --shm-size 20G -v $HOME:$HOME --name <container name> ohadico97/mer:v1
+```
 #### **Clone the Repository**
 ```bash
 git clone https://github.com/yourusername/Multi-Modal-SER.git
