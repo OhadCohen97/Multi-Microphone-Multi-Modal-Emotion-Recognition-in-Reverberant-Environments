@@ -70,11 +70,27 @@ The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCA
 Place datasets inside `data/` folder:
 ```bash
 MER/
-│── RAVDESS/
+│── <dataset name & type>/
       │── data/
             │── train.npy
             │── val.npy
             │── test.npy
+│── ACE/
+      │── <dataset name>
+            │── MP1/
+                  │── Lecture_room_1_508
+                        │── train.npy
+                        │── val.npy
+                        │── test.npy
+                  │── Lecture_room_2_403a
+                        │── train.npy
+                        │── val.npy
+                        │── test.npy
+                  │── lobby
+                     ...
+                  │── Meeting room_2 _611
+                  │── Office_1_502
+                  │── Office_2_803
 ```
 
 ---
@@ -89,8 +105,10 @@ To train:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py train
 ```
 #### **Evaluate Performance**
+To evaluate the model, you must set the paths for the npy files. See in ```main.py test_ace (lines 219,236,253) ```.
+
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
+CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test_ace
 ```
 
 ---
