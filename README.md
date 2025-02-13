@@ -58,8 +58,8 @@ docker run -it --gpus all --shm-size 20G -v $HOME:$HOME --name <container name> 
 ```
 #### **Clone the Repository**
 ```bash
-git clone https://github.com/yourusername/Multi-Modal-SER.git
-cd Multi-Modal-SER
+git clone https://github.com/OhadCohen97/Multi-Microphone-Multi-Modal-Emotion-Recognition-in-Reverberant-Environments.git
+cd Multi-Microphone-Multi-Modal-Emotion-Recognition-in-Reverberant-Environments
 ```
 #### **Use the Virtual Environment**
 ```bash
@@ -106,18 +106,18 @@ MER/
 #### **Preprocess Data**
 For preprocess the data see the notebooks.
 #### **Fine-tune the Models**
-First, in ```config.py```, make sure you have the HTS-AT AudioSet pre-trained model and the path to it. Set the root path to the dataset you with to use.
+First, in ```config.py```, make sure you have the HTS-AT AudioSet pre-trained model and the path to it. Set the root path to the dataset you wish to use.
 To train:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py train
 ```
 #### **Evaluate Performance**
-To evaluate the model, you must set the paths for the npy files. See in ```main.py test_ace (lines 219,236,253) ```.
+To evaluate the models, set the paths for the npy files. See in ```main.py test_ace (lines 219,236,253) ```.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test_ace
 ```
-For single test on one npy file:
+For a single test run on one npy file:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
