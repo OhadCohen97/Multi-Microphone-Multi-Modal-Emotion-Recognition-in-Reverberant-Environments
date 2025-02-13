@@ -10,7 +10,7 @@ Architecture", incorporating multi-modal learning to further improve robustness.
 ---
 
 ## 🔍 Overview
-Human emotions are conveyed through **speech and facial expressions**, making **multi-modal emotion recognition (MER)** crucial for robust emotion classification. This work introduces a **multi-microphone, multi-modal system** combining:
+Human emotions are conveyed through **speech and facial expressions**, making **multi-modal emotion recognition (MER)** crucial for robust emotion classification. This work introduces a **multi-microphone and multi-modal system** combining:
 
 - **HTS-AT Transformer** for multi-channel audio processing
 - **R(2+1)D ResNet CNN** for video-based emotion recognition
