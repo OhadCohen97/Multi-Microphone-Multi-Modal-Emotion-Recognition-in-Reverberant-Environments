@@ -93,7 +93,7 @@ class Emotion_DataLoader(Dataset):
             # frames = load_video(vid_path+self.dataset[p][0]["video_name"])
             # video_tensor = video_to_tensor(frames)
 
-            video_tensor, _, _ = torchvision.io.read_video(config.video_path + self.dataset[p][0]["video_name"])
+            video_tensor, _, _ = torchvision.io.read_video(self.config.video_path + self.dataset[p][0]["video_name"])
 
             v = self.vt(video_tensor.unsqueeze(0))
             
