@@ -5,6 +5,7 @@ multimodal = True
 if multimodal == True:
     audio = True
     video = True
+    video_path = "/home/dsi/ohadico97/HTS-AT_MER/mer/RAVDESS/Video/"
 else: #chose modality
     audio = True
     video = False
