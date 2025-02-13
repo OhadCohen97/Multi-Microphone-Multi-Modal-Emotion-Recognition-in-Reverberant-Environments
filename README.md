@@ -1,6 +1,6 @@
-# Multi-Microphone & Multi-Modal Emotion Recognition in Reverberant Environments - Submitted to EUSIPCO 2025
+# Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments - Submitted to EUSIPCO 2025
 
-🔥 **Official repository for the paper:**  
+🔥 **Official repository PyTorch-Lightning code for the paper:**  
 **"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"**  
 This work is an extension of our previous paper "Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer
 Architecture", incorporating multi-modal learning to further improve robustness.  
