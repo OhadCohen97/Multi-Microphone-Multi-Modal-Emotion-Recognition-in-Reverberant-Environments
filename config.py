@@ -40,7 +40,7 @@ confusion_matrix = False # for plotting confusion matrix in sed_model.py
 if dataset_type == "RAVDESS":
     random_seed = 1 # 19970318 970131 12412 127777 1009 34047
     dataset_path = "/home/dsi/ohadico97/HTS-AT_MER/data_rev_gen/RAVDESS_AV_actor_split_REV_1440_500_850" #"/home/dsi/ohadico97/HTS-AT_MER/data_clean/RAVDESS_AV" #"/home/dsi/ohadico97/HTS-AT_MER/data_clean/RAVDESS_AV_actor_split"  # the dataset path 
-    classes_num = 8 
+    classes_num = 8 # 7 classes for the first work. change data accordingly
     sec = 4
     es_patience = 12
     time_drop = 64
