@@ -77,11 +77,11 @@ The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCA
 Place datasets inside `data/` folder:
 ```bash
 MER/
-│── <dataset name & type>/
-      │── data/
-            │── train.npy
-            │── val.npy
-            │── test.npy
+  │── data/
+        │── <dataset name & type>/
+                   │── train.npy
+                   │── val.npy
+                   │── test.npy
 │── ACE/
       │── <dataset name>
             │── MP1/
