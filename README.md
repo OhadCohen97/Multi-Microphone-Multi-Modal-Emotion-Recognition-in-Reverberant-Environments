@@ -70,9 +70,9 @@ Python 3.8.13 ('base')
 
 ### **2️⃣ Dataset Setup**
 The previous paper evaluated the models on three datasets: **RAVDESS**, **IEMOCAP**, and **CREMA-D**. In this work, we focus exclusively on the **RAVDESS** dataset. The **training and validation splits** are reverberated synthetically using the **'gpuRIR' Python library**, while the **test sets** are reverberated with real-world ACE RIRs recorded in various acoustic environments. You can choose which modality to fine-tune using the ```multimodal``` flag in ```config.py```.
-- 🔗 [Dataset & Pretrained Models](LINK_TO_DATA_MODELS)
+- 🔗 [Dataset & Pre-trained Models](https://www.dropbox.com/scl/fo/px0lqliq9kc53tpv2smf2/AGnCptxxQBvGsigrih7urbU?rlkey=cxtlcus07oka82xvfruz8t5cw&st=2lm1tbt9&dl=0)
 
-**Note** that the first work fine-tuned on diffrent amounts of samples and splits.
+**Note** that the first work fine-tuned on different amounts of samples and splits.
 
 Place datasets inside `data/` folder:
 ```bash
