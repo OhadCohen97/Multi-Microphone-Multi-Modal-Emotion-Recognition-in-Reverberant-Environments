@@ -1,4 +1,4 @@
-# Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments - Submitted to EUSIPCO 2025
+# Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments - Accepted to EUSIPCO 2025
 
 🔥 **Official repository PyTorch-Lightning code for the paper:**  
 **"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"**  
