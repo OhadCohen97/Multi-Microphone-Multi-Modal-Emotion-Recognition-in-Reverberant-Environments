@@ -1,10 +1,13 @@
-# Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments - Submitted to EUSIPCO 2025
+# Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments - Accepted to EUSIPCO 2025
 
 🔥 **Official repository PyTorch-Lightning code for the paper:**  
-**"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"**  
-This work is an extension of our previous paper "Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer
-Architecture", incorporating multi-modal learning to further improve robustness.  
-📄 [Read the Paper](https://arxiv.org/pdf/2409.09545)  
+**"Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environments"** (EUSIPCO 2025)  
+This work is an extension of our previous paper, [**"Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer Architecture"**](https://ieeexplore.ieee.org/document/10887873) (ICASSP 2025). It adds multi-modal learning to further improve robustness.  
+📄 [Read the Paper (IEEE Xplore)](https://ieeexplore.ieee.org/document/11226096) | [arXiv](https://arxiv.org/pdf/2409.09545)  
+
+🍎 **New:** the code now also runs on Apple-silicon Macs, on the [`mac-port`](https://github.com/OhadCohen97/Multi-Microphone-Multi-Modal-Emotion-Recognition-in-Reverberant-Environments/tree/mac-port) branch (setup and steps are in that branch's README). Note that the Mac version builds its data with different RIR processing from the paper, and uses its own actor split, so its results are not directly comparable to the paper's:
+- the training rooms are simulated with pyroomacoustics instead of gpuRIR, with each microphone placed independently;
+- every RIR is cut at the direct path, and the ACE RIRs are resampled to 16 kHz.
 
 
 ---
@@ -133,11 +136,24 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4 python3 main.py test
 ## 🏆 Citation
 If you use this work, please cite:
 ```bibtex
-@article{cohen2024multi,
+@inproceedings{cohen2025mer,
   title={Multi-Microphone and Multi-Modal Emotion Recognition in Reverberant Environment},
   author={Cohen, Ohad and Hazan, Gershon and Gannot, Sharon},
-  journal={arXiv preprint arXiv:2409.09545},
-  year={2024}
+  booktitle={2025 33rd European Signal Processing Conference (EUSIPCO)},
+  pages={940--944},
+  year={2025},
+  doi={10.23919/EUSIPCO63237.2025.11226096}
+}
+```
+and the first paper:
+```bibtex
+@inproceedings{cohen2025ser,
+  title={Multi-Microphone Speech Emotion Recognition Using the Hierarchical Token-Semantic Audio Transformer Architecture},
+  author={Cohen, Ohad and Hazan, Gershon and Gannot, Sharon},
+  booktitle={ICASSP 2025 - 2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)},
+  pages={1--5},
+  year={2025},
+  doi={10.1109/ICASSP49660.2025.10887873}
 }
 ```
 
