@@ -5,7 +5,7 @@
 This work is an extension of our previous paper, [**"Multi-Microphone Speech Emotion Recognition using the Hierarchical Token-semantic Audio Transformer Architecture"**](https://ieeexplore.ieee.org/document/10887873) (ICASSP 2025). It adds multi-modal learning to further improve robustness.  
 📄 [Read the Paper (IEEE Xplore)](https://ieeexplore.ieee.org/document/11226096) | [arXiv](https://arxiv.org/pdf/2409.09545)  
 
-🍎 **New:** the code now also runs on Apple-silicon Macs, on the [`mac-port`](https://github.com/OhadCohen97/Multi-Microphone-Multi-Modal-Emotion-Recognition-in-Reverberant-Environments/tree/mac-port) branch (setup and steps are in that branch's README). Note that the Mac version builds its data with different RIR processing from the paper, and uses its own actor split, so its results are not directly comparable to the paper's:
+🍎 **New (11/2026):** the code now also runs on Apple-silicon Macs, on the [`mac-port`](https://github.com/OhadCohen97/Multi-Microphone-Multi-Modal-Emotion-Recognition-in-Reverberant-Environments/tree/mac-port) branch (setup and steps are in that branch's README). Note that the Mac version builds its data with different RIR processing from the paper, and uses its own actor split, so its results are not directly comparable to the paper's:
 - the training rooms are simulated with pyroomacoustics instead of gpuRIR, with each microphone placed independently;
 - every RIR is cut at the direct path, and the ACE RIRs are resampled to 16 kHz.
 
