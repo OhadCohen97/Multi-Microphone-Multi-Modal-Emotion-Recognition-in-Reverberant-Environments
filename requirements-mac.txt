@@ -1,0 +1,28 @@
+# Environment for running MER on macOS (Apple Silicon, MPS) -- see README "Running on macOS".
+#   conda create -n mer python=3.12 -y && conda activate mer
+#   pip install -r requirements-mac.txt
+# The Linux/CUDA reference environment is still the Docker image (ohadico97/mer:v1).
+
+torch==2.9.0
+torchvision==0.24.0
+pytorch-lightning==2.5.5
+# numpy<2 keeps the pickled .npy datasets loadable by the numpy 1.x in the Docker image
+numpy==1.26.4
+pandas<3
+scipy
+scikit-learn
+librosa
+torchlibrosa==0.1.0
+soundfile
+av                  # PyAV: video decoding
+pyroomacoustics     # CPU room simulation (replaces gpuRIR, which needs CUDA)
+seaborn
+matplotlib
+h5py
+tqdm
+wandb
+confidence-intervals
+gdown               # AudioSet checkpoint download from Google Drive
+ipykernel
+nbclient
+nbformat

@@ -407,7 +407,10 @@ class MMER(nn.Module):
         self.config = config
 
         if self.config.audio == True:
-            self.spec_size = spec_size 
+            if not (config.mode_type == "avg_mel" or (config.mode_type == "sum" and num_mics > 1)):
+                raise ValueError("mode_type must be 'avg_mel', or 'sum' with num_mics > 1 (got %r with num_mics=%d)"
+                                 % (config.mode_type, num_mics))
+            self.spec_size = spec_size
             self.patch_stride = patch_stride
             self.patch_size = patch_size
             self.window_size = window_size
@@ -518,12 +521,12 @@ class MMER(nn.Module):
             self.apply(self._init_weights)
 
         if self.config.video == True and self.config.multimodal == False:
-            self.video_encoder = VideoModel(model_name=config.video_model) #'x3d_s' 
-            self.classifier = ClassificationLayer()
+            self.video_encoder = VideoModel(model_name=config.video_model) #'x3d_s'
+            self.classifier = ClassificationLayer(n_classes=config.classes_num)
             # self.classifier = nn.Linear(768 , config.classes_num)#1536, 768 for element-wise addition
         if self.config.multimodal == True:
             self.video_encoder = VideoModel(model_name=config.video_model)
-            self.classifier = ClassificationLayer(num_feat=self.embed_dim*8*2)
+            self.classifier = ClassificationLayer(num_feat=self.embed_dim*8*2, n_classes=config.classes_num)
             # self.classifier = nn.Linear(self.embed_dim*8*2 , config.classes_num)#1536, 768 for element-wise addition
 
     def _init_weights(self, m):

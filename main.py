@@ -1,4 +1,5 @@
 import os
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1") # run any op the Apple-silicon GPU lacks on the CPU
 import numpy as np
 import argparse
 import logging
@@ -14,12 +15,21 @@ from model.mmer import MMER
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 import warnings
-import wandb
-from pytorch_lightning.loggers import WandbLogger
 import pandas as pd
 
 warnings.filterwarnings("ignore")
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+PL_VERSION = tuple(int(v) for v in pl.__version__.split(".")[:2])
+
+# file names inside config.dataset_path (train, eval) and of a test split
+TRAIN_FILES = {
+    "RAVDESS": ("ravdess_av_train.npy", "ravdess_av_eval.npy"), # 8 classes
+    "IEMOCAP": ("IEMOCAP_train_BIUREVgen.npy", "IEMOCAP_eval_BIUREVgen.npy"), # 4 classes
+    "CREMA-D": ("CREMAD_train_BIUREVgen.npy", "CREMAD_eval_BIUREVgen.npy"), # 6 classes
+}
+TEST_FILES = {"RAVDESS": "ravdess_av_test.npy", "IEMOCAP": "iemocap_test.npy", "CREMA-D": "cremad_test.npy"}
+
 
 class data_prep(pl.LightningDataModule):
     def __init__(self, train_dataset, eval_dataset, device_num):
@@ -27,68 +37,162 @@ class data_prep(pl.LightningDataModule):
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.device_num = device_num
+        # per-step batch: the effective batch split over devices and gradient-accumulation steps
+        self.batch_size = max(1, config.batch_size // (device_num * getattr(config, "accumulate_grad_batches", 1)))
+
+    def _loader(self, dataset):
+        sampler = DistributedSampler(dataset, shuffle = False) if self.device_num > 1 else None
+        return DataLoader(
+            dataset = dataset,
+            num_workers = config.num_workers,
+            batch_size = self.batch_size,
+            shuffle = False,
+            sampler = sampler
+        )
 
     def train_dataloader(self):
-        train_sampler = DistributedSampler(self.train_dataset, shuffle = False) if self.device_num > 1 else None
-        train_loader = DataLoader(
-            dataset = self.train_dataset,
-            num_workers = config.num_workers,
-            batch_size = config.batch_size // self.device_num,
-            shuffle = False,
-            sampler = train_sampler
-        )
-        return train_loader
+        return self._loader(self.train_dataset)
     def val_dataloader(self):
-        eval_sampler = DistributedSampler(self.eval_dataset, shuffle = False) if self.device_num > 1 else None
-        eval_loader = DataLoader(
-            dataset = self.eval_dataset,
-            num_workers = config.num_workers,
-            batch_size = config.batch_size // self.device_num,
-            shuffle = False,
-            sampler = eval_sampler
-        )
-        return eval_loader
+        return self._loader(self.eval_dataset)
     def test_dataloader(self):
-        test_sampler = DistributedSampler(self.eval_dataset, shuffle = False) if self.device_num > 1 else None
-        test_loader = DataLoader(
-            dataset = self.eval_dataset,
-            num_workers = config.num_workers,
-            batch_size = config.batch_size // self.device_num,
-            shuffle = False,
-            sampler = test_sampler
-        )
-        return test_loader
-    
+        return self._loader(self.eval_dataset)
+
+
+def resolve_devices():
+    """(accelerator, number of devices) for config.accelerator: "auto" | "gpu" | "mps" | "cpu"."""
+    want = str(getattr(config, "accelerator", "auto")).lower()
+    if want in ("auto", "gpu", "cuda") and torch.cuda.is_available():
+        return "gpu", torch.cuda.device_count()
+    mps = getattr(torch.backends, "mps", None)
+    if want in ("auto", "mps") and mps is not None and mps.is_available():
+        if PL_VERSION >= (1, 7):
+            return "mps", 1
+        print("pytorch-lightning %s has no Apple-GPU (MPS) support (needs >= 1.7): using the CPU" % pl.__version__)
+    elif want not in ("auto", "cpu"):
+        print("accelerator %r is not available here: using the CPU" % want)
+    return "cpu", 1
+
+
+def make_trainer(**kwargs):
+    """pl.Trainer on the devices resolve_devices() picks. Works with pytorch-lightning 1.x (the Docker image)
+    and 2.x (requirements-mac.txt). Returns (trainer, number of devices)."""
+    accelerator, n = resolve_devices()
+    distributed = n > 1
+    if PL_VERSION >= (1, 5):
+        kwargs.update(accelerator=accelerator, devices=n)
+        kwargs["strategy"] = "ddp" if distributed else ("auto" if PL_VERSION >= (2, 0) else None)
+    else:
+        kwargs.update(gpus=n if accelerator == "gpu" else 0, accelerator="ddp" if distributed else None)
+        if "enable_checkpointing" in kwargs:
+            kwargs["checkpoint_callback"] = kwargs.pop("enable_checkpointing")
+    kwargs["use_distributed_sampler" if PL_VERSION >= (2, 0) else "replace_sampler_ddp"] = False
+    kwargs["sync_batchnorm"] = distributed and kwargs.get("sync_batchnorm", False)
+    accumulate = kwargs.get("accumulate_grad_batches", 1)
+    print("Trainer: %s x%d, %d sample(s) per device per step%s" % (accelerator, n,
+          max(1, config.batch_size // (n * getattr(config, "accumulate_grad_batches", 1))),
+          ", gradients accumulated over %d steps" % accumulate if accumulate > 1 else ""))
+    return pl.Trainer(**kwargs), n
+
+
+def load_checkpoint(path):
+    """torch.load with the safe tensors-only unpickler first; full unpickling (which can run code from the file)
+    only for checkpoints that need it, e.g. Lightning checkpoints storing callback objects."""
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError: # torch < 1.13 has no weights_only argument
+        return torch.load(path, map_location="cpu")
+    except Exception: # pickle.UnpicklingError for non-tensor content
+        print("%s stores Python objects besides tensors (pytorch-lightning 1.x checkpoints do): loading it with full "
+              "unpickling, which can run code from the file -- fine for your own checkpoints, only use it with files "
+              "you trust" % os.path.basename(path))
+        return torch.load(path, map_location="cpu", weights_only=False)
+
+
+def load_weights(model, path, drop=()):
+    """Load a checkpoint into `model` with strict=False (as before) and print what did not match, so a wrong
+    checkpoint or config no longer goes unnoticed."""
+    if not os.path.exists(path):
+        raise FileNotFoundError("checkpoint not found: %s" % path)
+    state = load_checkpoint(path)
+    state = state.get("state_dict", state)
+    for key in drop:
+        state.pop(key, None)
+    result = model.load_state_dict(state, strict=False)
+
+    def summary(keys):
+        groups = {}
+        for key in keys:
+            group = ".".join(key.split(".")[:2])
+            groups[group] = groups.get(group, 0) + 1
+        return ", ".join("%s (%d)" % item for item in sorted(groups.items())) or "none"
+    print("Loaded %s: %d tensors | missing from checkpoint: %s | unused: %s" % (
+        os.path.basename(path), len(state) - len(result.unexpected_keys),
+        summary(result.missing_keys), summary(result.unexpected_keys)))
+    return result
+
+
+def build_model(dataset):
+    sed_model = MMER(
+        spec_size=config.htsat_spec_size,
+        patch_size=config.htsat_patch_size,
+        in_chans=1,
+        num_mics=config.num_mics,
+        num_classes=config.classes_num,
+        window_size=config.htsat_window_size,
+        config = config,
+        depths = config.htsat_depth,
+        embed_dim = config.htsat_dim,
+        patch_stride=config.htsat_stride,
+        num_heads=config.htsat_num_head
+    )
+    return SEDWrapper(sed_model = sed_model, config = config, dataset = dataset)
+
+
+def load_split(folder, filename, eval_mode):
+    path = os.path.join(folder, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError("%s not found -- build it with prepare_data.py (see MER_mac_tutorial.ipynb)" % path)
+    return Emotion_DataLoader(dataset = np.load(path, allow_pickle = True), config = config, eval_mode = eval_mode)
+
+
+def experiment_dir():
+    return os.path.join(config.workspace, "results_"+config.dataset_type+"_batch_size"+str(config.batch_size)+"_num_mics"+str(config.num_mics)+"_"+config.mode_type+"_seed"+str(config.random_seed), config.exp_name)
+
 
 def weight_average():
+    folder = config.wa_folder or os.path.join(experiment_dir(), "checkpoint", "checkpoints")
+    model_files = sorted(f for f in os.listdir(folder) if f.endswith(".ckpt"))
+    if not model_files:
+        raise FileNotFoundError("no .ckpt files in %s" % folder)
+    print("Averaging %d checkpoints from %s" % (len(model_files), folder))
     model_ckpt = []
-    model_files = os.listdir(config.wa_folder)
     wa_ckpt = {
         "state_dict": {}
     }
 
     for model_file in model_files:
-        model_file = os.path.join(config.wa_folder, model_file)
-        model_ckpt.append(torch.load(model_file, map_location="cpu")["state_dict"])
+        model_file = os.path.join(folder, model_file)
+        model_ckpt.append(load_checkpoint(model_file)["state_dict"])
     keys = model_ckpt[0].keys()
     for key in keys:
         model_ckpt_key = torch.cat([d[key].float().unsqueeze(0) for d in model_ckpt])
         model_ckpt_key = torch.mean(model_ckpt_key, dim = 0)
-        assert model_ckpt_key.shape == model_ckpt[0][key].shape, "the shape is unmatched " + model_ckpt_key.shape + " " + model_ckpt[0][key].shape
+        assert model_ckpt_key.shape == model_ckpt[0][key].shape, "the shape is unmatched %s %s" % (model_ckpt_key.shape, model_ckpt[0][key].shape)
         wa_ckpt["state_dict"][key] = model_ckpt_key
     torch.save(wa_ckpt, config.wa_model_path)
+    print("Saved", config.wa_model_path)
 
 def esm_test():
     device_num = torch.cuda.device_count()
     print("each batch size:", config.batch_size // device_num)
-    
+
     if config.dataset_type == "RAVDESS":
         print("Test on RAVDESS")
-        test_set = np.load(os.path.join(config.dataset_path, "ravdess_test.npy"), allow_pickle = True) 
+        test_set = np.load(os.path.join(config.dataset_path, "ravdess_test.npy"), allow_pickle = True)
     elif config.dataset_type == "IEMOCAP":
         print("Test on IEMOCAP")
         test_set = np.load(os.path.join(config.dataset_path, "iemocap_test.npy"), allow_pickle = True)
-        
+
     eval_dataset = Emotion_DataLoader(
             dataset = test_set,
             config = config,
@@ -97,9 +201,9 @@ def esm_test():
     audioset_data = data_prep(eval_dataset, eval_dataset, device_num)
     trainer = pl.Trainer(
         deterministic=True,
-        gpus = device_num, 
+        gpus = device_num,
         max_epochs = config.max_epoch,
-        auto_lr_find = True,    
+        auto_lr_find = True,
         sync_batchnorm = True,
         checkpoint_callback = False,
         accelerator = "ddp" if device_num > 1 else None,
@@ -123,7 +227,7 @@ def esm_test():
             num_heads=config.htsat_num_head
         )
         sed_wrapper = SEDWrapper(
-            sed_model = sed_model, 
+            sed_model = sed_model,
             config = config,
             dataset = eval_dataset
         )
@@ -132,226 +236,76 @@ def esm_test():
         ckpt["state_dict"].pop("sed_model.head.bias")
         sed_wrapper.load_state_dict(ckpt["state_dict"], strict=False)
         sed_models.append(sed_wrapper)
-    
+
     model = Ensemble_SEDWrapper(
-        sed_models = sed_models, 
+        sed_models = sed_models,
         config = config,
         dataset = eval_dataset
     )
     trainer.test(model, datamodule=audioset_data)
 
 
-def test():
-    device_num = torch.cuda.device_count()
-    print("each batch size:", config.batch_size // device_num)
-    # dataset file pathes
-    if config.dataset_type == "RAVDESS":
-            print("Test on RAVDESS")
-            test_set = np.load(os.path.join(config.dataset_path, "ravdess_av_test.npy"), allow_pickle = True)#ravdess_ALL_REV_160.npy ravdess_test_BIUREVgen
-            eval_dataset = Emotion_DataLoader(
-                dataset = test_set,
-                config = config,
-                eval_mode = True
-            )
-    elif config.dataset_type == "IEMOCAP":
-            print("Test on IEMOCAP")
-            test_set = np.load(os.path.join(config.dataset_path, "iemocap_test.npy"), allow_pickle = True)# iemocap_all IEMOCAP_test_BIUREVgen.npy
-            eval_dataset = Emotion_DataLoader(
-                dataset = test_set,
-                config = config,
-                eval_mode = True
-            )
-    elif config.dataset_type == "CREMA-D":
-            print("Test on CREMA-D")
-            test_set = np.load(os.path.join(config.dataset_path, "cremad_test.npy"), allow_pickle = True)#cremad_rev_2m_090_all.npy CREMAD_test_BIUREVgen.npy cremad_test
-            eval_dataset = Emotion_DataLoader(
-                dataset = test_set,
-                config = config,
-                eval_mode = True
-            )
-
+def evaluate(model, eval_dataset):
+    """Run trainer.test of `model` on one test split; returns the logged metrics (acc, CI_low, CI_high)."""
+    _, device_num = resolve_devices()
     data = data_prep(eval_dataset, eval_dataset, device_num)
-    trainer = pl.Trainer(
+    trainer, _ = make_trainer(
         deterministic=True,
-        gpus = device_num, 
         max_epochs = config.max_epoch,
-        auto_lr_find = True,    
         sync_batchnorm = True,
-        checkpoint_callback = False,
-        accelerator = "ddp" if device_num > 1 else None,
+        enable_checkpointing = False,
         num_sanity_val_steps = 0,
-        resume_from_checkpoint = config.resume_checkpoint_test,
-        replace_sampler_ddp = False,
-        gradient_clip_val=1.0
+        gradient_clip_val=1.0,
+        logger = False
     )
-    sed_model = MMER(
-        spec_size=config.htsat_spec_size,
-        patch_size=config.htsat_patch_size,
-        in_chans=1,
-        num_mics=config.num_mics,
-        num_classes=config.classes_num,
-        window_size=config.htsat_window_size,
-        config = config,
-        depths = config.htsat_depth,
-        embed_dim = config.htsat_dim,
-        patch_stride=config.htsat_stride,
-        num_heads=config.htsat_num_head
-    )
-    
-    model = SEDWrapper(
-        sed_model = sed_model, 
-        config = config,
-        dataset = eval_dataset
-    )
+    return trainer.test(model, datamodule=data)
+
+
+def test():
+    print("Test on", config.dataset_type)
+    eval_dataset = load_split(config.dataset_path, TEST_FILES[config.dataset_type], eval_mode = True)
+    model = build_model(eval_dataset)
     if config.resume_checkpoint_test is not None:
-        ckpt = torch.load(config.resume_checkpoint_test, map_location="cpu")
-        ckpt["state_dict"].pop("sed_model.head.weight") # put in comment when testing video model 
-        ckpt["state_dict"].pop("sed_model.head.bias") # put in comment when testing video model 
-        model.load_state_dict(ckpt["state_dict"], strict=False)
-    trainer.test(model, datamodule=data)
+        load_weights(model, config.resume_checkpoint_test, drop = ["sed_model.head.weight", "sed_model.head.bias"])
+    return evaluate(model, eval_dataset)
 
 
 def test_ace():
-    # must change mode_type and datasetype as well in config.py
-    models = {"/home/dsi/ohadico97/HTS-AT_MER/HTSAT_RAVDESS_Saved_x.ckpt":1} # {model path: number of mics}
-
-    if config.dataset_type == "RAVDESS":
-        rooms = ['/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Lecture_room_1_508',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Lecture_room_2_403a',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/lobby',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Meeting room_2_611',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Meeting_room_1_503',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Office_1_502',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp1/Office_2_803',
-                # MP2
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Lecture_room_1_508',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Lecture_room_2_403a',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/lobby',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Meeting room_2_611',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Meeting_room_1_503',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Office_1_502',
-                '/home/dsi/ohadico97/HTS-AT_MER/ACE/RAVDESS_actor_split/mp2/Office_2_803']
-                
-    elif config.dataset_type == "IEMOCAP":
-        rooms = ['/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Lecture_room_1_508',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Lecture_room_2_403a',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/lobby',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Meeting room_2 _611',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Meeting_room_1_503',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Office_1_502',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp1_test_set/Office_2_803',
-                # MP2
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Lecture_room_1_508',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Lecture_room_2_403a',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/lobby',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Meeting room_2 _611',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Meeting_room_1_503',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Office_1_502',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/IEMOCAP/mp2_test_set/Office_2_803']
-        
-    elif config.dataset_type == "CREMA-D":
-                rooms = ['/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Lecture_room_1_508',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Lecture_room_2_403a',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/lobby',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Meeting room_2 _611',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Meeting_room_1_503',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Office_1_502',
-                 '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp1_test_set/Office_2_803',
-                # MP2
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Lecture_room_1_508',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Lecture_room_2_403a',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/lobby',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Meeting room_2 _611',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Meeting_room_1_503',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Office_1_502',
-                '/ohadcolab/ohadcolab/datasets/ser/real_RIRs_datasets/ACE/CREMAD/mp2_test_set/Office_2_803']
-    
-    i = 0
-    for model_path,mics in models.items():
-        if i == 2:
-            config.mode_type = 'sum'
-        config.num_mics = mics
-        config.resume_checkpoint_test = model_path
-        print('MODEL: ', config.resume_checkpoint_test)
-        df = pd.read_csv('/home/dsi/ohadico97/HTS-AT_MER/ConfidenceIntervals-main/multi_channel_sum copy 2.csv', sep='|')
-        for idx,dataset_path in enumerate(rooms):
-            device_num = torch.cuda.device_count()
-            # dataset file pathes
-            if config.dataset_type == "RAVDESS":
-                    print("Test on RAVDESS")
-                    test_set = np.load(os.path.join(dataset_path, "ravdess_av_test.npy"), allow_pickle = True)#ravdess_ALL_REV_160.npy ravdess_test_BIUREVgen
-                    eval_dataset = Emotion_DataLoader(
-                        dataset = test_set,
-                        config = config,
-                        eval_mode = True
-                    )
-            elif config.dataset_type == "IEMOCAP":
-                    print("Test on IEMOCAP")
-                    test_set = np.load(os.path.join(dataset_path, "iemocap_test.npy"), allow_pickle = True)# iemocap_all IEMOCAP_test_BIUREVgen.npy
-                    eval_dataset = Emotion_DataLoader(
-                        dataset = test_set,
-                        config = config,
-                        eval_mode = True
-                    )
-            elif config.dataset_type == "CREMA-D":
-                    print("Test on CREMA-D")
-                    test_set = np.load(os.path.join(dataset_path, "cremad_test.npy"), allow_pickle = True)#cremad_rev_2m_090_all.npy CREMAD_test_BIUREVgen.npy
-                    eval_dataset = Emotion_DataLoader(
-                        dataset = test_set,
-                        config = config,
-                        eval_mode = True
-                    )
-
-            data = data_prep(eval_dataset, eval_dataset, device_num)
-            trainer = pl.Trainer(
-                deterministic=True,
-                gpus = device_num, 
-                max_epochs = config.max_epoch,
-                auto_lr_find = True,    
-                sync_batchnorm = True,
-                checkpoint_callback = False,
-                accelerator = "ddp" if device_num > 1 else None,
-                num_sanity_val_steps = 0,
-                resume_from_checkpoint = config.resume_checkpoint_test,
-                replace_sampler_ddp = False,
-                gradient_clip_val=1.0
-            )
-            sed_model = MMER(
-                spec_size=config.htsat_spec_size,
-                patch_size=config.htsat_patch_size,
-                in_chans=1,
-                num_mics=config.num_mics,
-                num_classes=config.classes_num,
-                window_size=config.htsat_window_size,
-                config = config,
-                depths = config.htsat_depth,
-                embed_dim = config.htsat_dim,
-                patch_stride=config.htsat_stride,
-                num_heads=config.htsat_num_head
-            )
-            
-            model = SEDWrapper(
-                sed_model = sed_model, 
-                config = config,
-                dataset = eval_dataset
-            )
-            if config.resume_checkpoint_test is not None:
-                ckpt = torch.load(config.resume_checkpoint_test, map_location="cpu")
-                ckpt["state_dict"].pop("sed_model.head.weight") # put in comment when testing video model 
-                ckpt["state_dict"].pop("sed_model.head.bias") # put in comment when testing video model 
-                model.load_state_dict(ckpt["state_dict"], strict=False)
-            res = trainer.test(model, datamodule=data)
-            df['RAVDESS'][idx]= (res[0]['acc'],(res[0]['CI_low'],res[0]['CI_high']))
-            print('NUM MICS: ', config.num_mics)
-            print('ROOM: ',dataset_path)
-        i = i + 1
-        #write to CSV
-        df.to_csv('/home/dsi/ohadico97/HTS-AT_MER/CI_results/res_66/'+model_path.split('/')[-2]+'.csv', sep='|', index=True)
+    # each model is evaluated on <ace_path>/<mic position>/<room>/<test file>, rooms and models from config.py
+    rooms = [(mp, room) for mp in config.ace_mic_positions for room in config.ace_rooms]
+    models = config.ace_models or {config.resume_checkpoint_test: config.num_mics}
+    for model_path, spec in models.items():
+        num_mics, mode_type = spec if isinstance(spec, (tuple, list)) else (spec, config.mode_type)
+        config.num_mics, config.mode_type, config.resume_checkpoint_test = num_mics, mode_type, model_path
+        print('MODEL: ', model_path, '| num_mics:', num_mics, '| mode:', mode_type)
+        model = None
+        rows = []
+        for mp, room in rooms:
+            eval_dataset = load_split(os.path.join(config.ace_path, mp, room), TEST_FILES[config.dataset_type], eval_mode = True)
+            if model is None:
+                model = build_model(eval_dataset)
+                load_weights(model, model_path, drop = ["sed_model.head.weight", "sed_model.head.bias"])
+            res = evaluate(model, eval_dataset)[0]
+            rows.append({"mic_position": mp, "room": room, "acc": res["acc"],
+                         "CI_low": res.get("CI_low"), "CI_high": res.get("CI_high")})
+            print('NUM MICS: ', config.num_mics, '| ROOM: ', mp, room, '| acc: %.4f' % res["acc"])
+        df = pd.DataFrame(rows)
+        os.makedirs(config.ace_results_dir, exist_ok=True)
+        name = os.path.basename(os.path.dirname(os.path.abspath(model_path))) + "_" + os.path.splitext(os.path.basename(model_path))[0]
+        out = os.path.join(config.ace_results_dir, name + ".csv")
+        df.to_csv(out, sep='|', index=False)
+        print(df.to_string(index=False))
+        print("Wrote", out)
 
 def train():
-    if config.debug == False:
-        wandb_logger = WandbLogger()
+    exp_dir = experiment_dir()
+    checkpoint_dir = os.path.join(exp_dir, "checkpoint")
+    if config.debug == False and config.use_wandb:
+        import wandb
+        from pytorch_lightning.loggers import WandbLogger
+        logger = WandbLogger()
         # start a new wandb run to track this script
+        wandb_proj_name = " " + config.mode_type
         if config.audio == True and config.num_mics == 1 and config.multimodal == False:
             wandb_proj_name = "Single-Channel Audio HTSAT " + config.mode_type
         elif config.audio == True and config.num_mics == 1 and config.video ==True:
@@ -364,7 +318,7 @@ def train():
              wandb_proj_name = "Video pretrained " + config.dataset_type
         wandb.init(
             # set the wandb project where this run will be logged
-            project="HTS-AT "+config.dataset_type+ wandb_proj_name, #+ " Simulated dataset", | change the project name as you like 
+            project="HTS-AT "+config.dataset_type+ wandb_proj_name, #+ " Simulated dataset", | change the project name as you like
             # track hyperparameters and run metadata
             config={
             "architecture": "AduioSet fine-tune" + wandb_proj_name+"_"+config.mode_type,
@@ -396,6 +350,8 @@ def train():
             "epochs": config.max_epoch,
             "early_stopping_patience":config.es_patience,
             "batch_size":config.batch_size,
+            "accumulate_grad_batches": getattr(config, "accumulate_grad_batches", 1),
+            "accelerator": resolve_devices()[0],
             "learning_rate": config.learning_rate,
             "enable_tscam":config.enable_tscam,
             "htsat_window_size": config.htsat_window_size,
@@ -403,76 +359,32 @@ def train():
             "htsat_patch_size": config.htsat_patch_size,
             "htsat_stride": config.htsat_stride,
             "htsat_num_head": config.htsat_num_head,
-            "htsat_dim": config.htsat_dim, 
+            "htsat_dim": config.htsat_dim,
             "htsat_depth": config.htsat_depth
             }
         )
         wandb.run.log_code(".")
+    elif config.debug == False:
+        from pytorch_lightning.loggers import CSVLogger
+        logger = CSVLogger(save_dir = exp_dir, name = "logs") # metrics.csv per run
     else:
-        wandb_logger = None
-    
-    device_num = torch.cuda.device_count()
-    print("each batch size:", config.batch_size // device_num)
-    
-    if config.dataset_type == "RAVDESS":   # 8 classes
-        train_set = np.load(os.path.join(config.dataset_path, "ravdess_av_train.npy"), allow_pickle = True)#ravdess_train_BIUREVgen
-        eval_set = np.load(os.path.join(config.dataset_path, "ravdess_av_eval.npy"), allow_pickle = True)#ravdess_eval_BIUREVgen
-    elif config.dataset_type == "IEMOCAP": # 4 classes
-        train_set = np.load(os.path.join(config.dataset_path, "IEMOCAP_train_BIUREVgen.npy"), allow_pickle = True) #IEMOCAP_train_BIUREVgen.npy
-        eval_set = np.load(os.path.join(config.dataset_path, "IEMOCAP_eval_BIUREVgen.npy"), allow_pickle = True) #IEMOCAP_eval_BIUREVgen.npy
-    elif config.dataset_type == "CREMA-D": # 6 classes
-        train_set = np.load(os.path.join(config.dataset_path, "CREMAD_train_BIUREVgen.npy"), allow_pickle = True)
-        eval_set = np.load(os.path.join(config.dataset_path, "CREMAD_eval_BIUREVgen.npy"), allow_pickle = True)
+        logger = False
+
+    train_file, eval_file = TRAIN_FILES[config.dataset_type]
+    print("Using", config.dataset_type)
+    dataset = load_split(config.dataset_path, train_file, eval_mode = False)
+    eval_dataset = load_split(config.dataset_path, eval_file, eval_mode = True)
 
     # set exp folder
-    exp_dir = os.path.join(config.workspace, "results_"+config.dataset_type+"_batch_size"+str(config.batch_size)+"_num_mics"+str(config.num_mics)+"_"+config.mode_type+"_seed"+str(config.random_seed), config.exp_name)
-    checkpoint_dir = os.path.join(config.workspace, "results_"+config.dataset_type+"_batch_size"+str(config.batch_size)+"_num_mics"+str(config.num_mics)+"_"+config.mode_type+"_seed"+str(config.random_seed), config.exp_name, "checkpoint")
     if not config.debug:
-        create_folder(os.path.join(config.workspace, "results_"+config.dataset_type+"_batch_size"+str(config.batch_size)+"_num_mics"+str(config.num_mics)+"_"+config.mode_type+"_seed"+str(config.random_seed)))
-        create_folder(exp_dir)
         create_folder(checkpoint_dir)
         dump_config(config, os.path.join(exp_dir, config.exp_name), False)
 
-    if config.dataset_type == "RAVDESS":
-        print("Using RAVDESS")
-        dataset = Emotion_DataLoader(
-            dataset = train_set,
-            config = config,
-            eval_mode = False
-        )
-        eval_dataset = Emotion_DataLoader(
-            dataset = eval_set,
-            config = config,
-            eval_mode = True
-        )
-    if config.dataset_type == "IEMOCAP":
-        print("Using IEMOCAP")
-        dataset = Emotion_DataLoader(
-            dataset = train_set,
-            config = config,
-            eval_mode = False
-        )
-        eval_dataset = Emotion_DataLoader(
-            dataset = eval_set,
-            config = config,
-            eval_mode = True
-        )
-    if config.dataset_type == "CREMA-D":
-        print("Using CREMA-D")
-        dataset = Emotion_DataLoader(
-            dataset = train_set,
-            config = config,
-            eval_mode = False
-        )
-        eval_dataset = Emotion_DataLoader(
-            dataset = eval_set,
-            config = config,
-            eval_mode = True
-        )
-
+    _, device_num = resolve_devices()
     data = data_prep(dataset, eval_dataset, device_num)
 
     checkpoint_callback = ModelCheckpoint(
+            dirpath = os.path.join(checkpoint_dir, "checkpoints"),
             monitor = "acc",
             filename='l-{epoch:d}-{acc:.3f}',
             save_top_k = 8,
@@ -484,50 +396,26 @@ def train():
             verbose = True,
             mode = "min"
         )
-    trainer = pl.Trainer(
+    trainer, _ = make_trainer(
         deterministic=False,
         default_root_dir = checkpoint_dir,
-        gpus = device_num, 
         max_epochs = config.max_epoch,
-        auto_lr_find = True,    
         sync_batchnorm = True,
         callbacks = [checkpoint_callback,early_stopping_callback],
-        accelerator = "ddp" if device_num > 1 else None,
         num_sanity_val_steps = 0,
-        resume_from_checkpoint = None, 
-        replace_sampler_ddp = False,
         gradient_clip_val=1.0,
-        logger=wandb_logger
+        accumulate_grad_batches = getattr(config, "accumulate_grad_batches", 1),
+        logger=logger
     )
-    sed_model = MMER(
-        spec_size=config.htsat_spec_size,
-        patch_size=config.htsat_patch_size,
-        in_chans=1,
-        num_mics=config.num_mics,
-        num_classes=config.classes_num,
-        window_size=config.htsat_window_size,
-        config = config,
-        depths = config.htsat_depth,
-        embed_dim = config.htsat_dim,
-        patch_stride=config.htsat_stride,
-        num_heads=config.htsat_num_head
-    )
-    
-    model = SEDWrapper(
-        sed_model = sed_model, 
-        config = config,
-        dataset = dataset
-    )
+    model = build_model(dataset)
     if config.resume_checkpoint is not None:
-        ckpt = torch.load(config.resume_checkpoint, map_location="cpu")
-        ckpt["state_dict"].pop("sed_model.head.weight")
-        ckpt["state_dict"].pop("sed_model.head.bias")
-
-        ckpt["state_dict"].pop("sed_model.tscam_conv.weight")
-        ckpt["state_dict"].pop("sed_model.tscam_conv.bias")
-        model.load_state_dict(ckpt["state_dict"], strict=False)
+        if not os.path.exists(config.resume_checkpoint):
+            raise FileNotFoundError("resume_checkpoint not found: %s -- download it with "
+                                    "prepare_data.download_audioset_checkpoint(), or set it to None" % config.resume_checkpoint)
+        load_weights(model, config.resume_checkpoint, drop = ["sed_model.head.weight", "sed_model.head.bias",
+                                                              "sed_model.tscam_conv.weight", "sed_model.tscam_conv.bias"])
     elif config.swin_pretrain_path is not None: # train with pretrained model
-        ckpt = torch.load(config.swin_pretrain_path, map_location="cpu")
+        ckpt = load_checkpoint(config.swin_pretrain_path)
         # load pretrain model
         ckpt = ckpt["model"]
         found_parameters = []
@@ -565,9 +453,9 @@ def main():
     parser_test_ace = subparsers.add_parser("test_ace")
     args = parser.parse_args()
     # default settings
-    logging.basicConfig(level=logging.INFO) 
-    pl.utilities.seed.seed_everything(seed = config.random_seed)
-    
+    logging.basicConfig(level=logging.INFO)
+    pl.seed_everything(config.random_seed)
+
     if config.debug == True: # for debug and code check
         test_ace()
     if args.mode == "train":
@@ -582,7 +470,7 @@ def main():
         test_ace()
     else:
         raise Exception("Error Mode!")
-    
+
 
 if __name__ == '__main__':
     main()

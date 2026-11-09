@@ -11,7 +11,6 @@ import torch.optim as optim
 import torch.distributed as dist
 import pytorch_lightning as pl
 import config
-import wandb
 from confidence_intervals import evaluate_with_conf_int
 sns.set(rc={'figure.figsize':(12,8)})
 
@@ -28,9 +27,16 @@ def confusion(ans,pred,acc,dic):
     plt.title( "Multi-Channel Avg Mel MER - RAVDESS ACE Lecture Room 2 (T60=1220), Accuracy: " + str(round(acc*100,1))+"%")
     plt.ylabel('Actual label')
     plt.xlabel('Predicted label')
-    plt.savefig("/home/dsi/ohadico97/HTS-AT_MER/confusion_matrix/Multimodal_AVG_MEL_RAVDESS_ACE.png",dpi=300)
-    
-    
+    out_dir = os.path.join(config.workspace, "confusion_matrix")
+    os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(os.path.join(out_dir, "Multimodal_AVG_MEL_RAVDESS_ACE.png"),dpi=300)
+
+
+def is_distributed():
+    """True inside a multi-process (DDP) run, where predictions have to be gathered across ranks."""
+    return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
+
+
 class SEDWrapper(pl.LightningModule):
     def __init__(self, sed_model, config, dataset):
         super().__init__()
@@ -38,6 +44,10 @@ class SEDWrapper(pl.LightningModule):
         self.config = config
         self.dataset = dataset
         self.loss_func = get_loss_func(config.loss_type)
+        # step outputs collected for the epoch-end metrics (pytorch-lightning 2.x no longer passes them to
+        # *_epoch_end hooks; on_*_epoch_end exists in 1.x as well)
+        self._val_outputs = []
+        self._test_outputs = []
 
     def evaluate_metric(self, pred, ans):
         if self.config.dataset_type == "RAVDESS":
@@ -98,7 +108,7 @@ class SEDWrapper(pl.LightningModule):
         # wandb.log({"train_loss":loss})
         return loss
         
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self, *args):
         self.dataset.generate_queue()
 
     def validation_step(self, batch, batch_idx):
@@ -106,14 +116,17 @@ class SEDWrapper(pl.LightningModule):
         loss = self.loss_func(pred, batch["target"])
         self.log("val_loss", loss, on_epoch= True, prog_bar=True)
         # wandb.log({"val_loss":loss})
-        return [pred.detach(), batch["target"].detach()]
-    
-    def validation_epoch_end(self, validation_step_outputs):
+        self._val_outputs.append([pred.detach(), batch["target"].detach()])
+
+    def on_validation_epoch_end(self):
+        validation_step_outputs, self._val_outputs = self._val_outputs, []
+        if not validation_step_outputs:
+            return
         self.device_type = next(self.parameters()).device
         pred = torch.cat([d[0] for d in validation_step_outputs], dim = 0)
         target = torch.cat([d[1] for d in validation_step_outputs], dim = 0)
 
-        if torch.cuda.device_count() > 1:
+        if is_distributed():
             gather_pred = [torch.zeros_like(pred) for _ in range(dist.get_world_size())]
             gather_target = [torch.zeros_like(target) for _ in range(dist.get_world_size())]
             dist.barrier()
@@ -121,7 +134,7 @@ class SEDWrapper(pl.LightningModule):
         metric_dict = {
                 "acc":0.
             }
-        if torch.cuda.device_count() > 1:
+        if is_distributed():
             dist.all_gather(gather_pred, pred)
             dist.all_gather(gather_target, target)
             if dist.get_rank() == 0:
@@ -162,16 +175,19 @@ class SEDWrapper(pl.LightningModule):
         preds = torch.cat(preds, dim=0)
         pred = preds.mean(dim = 0)
         if self.config.fl_local:
-            return [
-                pred.detach().cpu().numpy(), 
+            self._test_outputs.append([
+                pred.detach().cpu().numpy(),
                 pred_map.detach().cpu().numpy(),
                 batch["audio_name"],
                 batch["real_len"].cpu().numpy()
-            ]
+            ])
         else:
-            return [pred.detach(), batch["target"].detach()]
+            self._test_outputs.append([pred.detach(), batch["target"].detach()])
 
-    def test_epoch_end(self, test_step_outputs):
+    def on_test_epoch_end(self):
+        test_step_outputs, self._test_outputs = self._test_outputs, []
+        if not test_step_outputs:
+            return
         self.device_type = next(self.parameters()).device
         if self.config.fl_local:
             pred = np.concatenate([d[0] for d in test_step_outputs], axis = 0)
@@ -193,14 +209,14 @@ class SEDWrapper(pl.LightningModule):
             self.device_type = next(self.parameters()).device
             pred = torch.cat([d[0] for d in test_step_outputs], dim = 0)
             target = torch.cat([d[1] for d in test_step_outputs], dim = 0)
-            if torch.cuda.device_count() > 1:
+            if is_distributed():
                 gather_pred = [torch.zeros_like(pred) for _ in range(dist.get_world_size())]
                 gather_target = [torch.zeros_like(target) for _ in range(dist.get_world_size())]
                 dist.barrier()
             metric_dict = {
                     "acc":0.
                 }
-            if torch.cuda.device_count() > 1:
+            if is_distributed():
                 dist.all_gather(gather_pred, pred)
                 dist.all_gather(gather_target, target)
                 if dist.get_rank() == 0:
@@ -218,9 +234,10 @@ class SEDWrapper(pl.LightningModule):
                 print(self.device_type, metric_dict, flush = True)
 
                 self.log("acc", metric_dict["acc"], on_epoch = True, prog_bar=True, sync_dist=False)
-                acc,interval = metric_dict['CI']
-                self.log("CI_low", interval[0], on_epoch = True, prog_bar=True, sync_dist=False)
-                self.log("CI_high", interval[1], on_epoch = True, prog_bar=True, sync_dist=False)
+                if "CI" in metric_dict: # only RAVDESS reports confidence intervals
+                    acc,interval = metric_dict['CI']
+                    self.log("CI_low", interval[0], on_epoch = True, prog_bar=True, sync_dist=False)
+                    self.log("CI_high", interval[1], on_epoch = True, prog_bar=True, sync_dist=False)
         #TODO: try to return CI. maybe self.log...
 
     

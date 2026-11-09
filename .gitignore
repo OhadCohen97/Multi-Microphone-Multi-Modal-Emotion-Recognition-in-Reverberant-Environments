@@ -1,0 +1,15 @@
+# datasets, downloads and run outputs (prepare_data.py, main.py)
+data/
+checkpoints/
+results_*/
+CI_results/
+confusion_matrix/
+*.ckpt
+runs/
+lightning_logs/
+wandb/
+*.part
+
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store

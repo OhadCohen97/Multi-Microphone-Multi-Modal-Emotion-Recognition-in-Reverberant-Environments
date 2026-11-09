@@ -15,6 +15,7 @@ import h5py
 import csv
 import time
 import json
+import types
 import librosa
 from datetime import datetime
 from tqdm import tqdm
@@ -85,12 +86,13 @@ def dump_config(config, filename, include_time = False):
     save_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     config_json = {}
     for key in dir(config):
-        if not key.startswith("_"):
-            config_json[key] = eval("config." + key)
+        value = getattr(config, key)
+        if not key.startswith("_") and not isinstance(value, types.ModuleType) and not callable(value):
+            config_json[key] = value
     if include_time:
         filename = filename + "_" + save_time
-    with open(filename + ".json", "w") as f:      
-        json.dump(config_json, f ,indent=4)
+    with open(filename + ".json", "w") as f:
+        json.dump(config_json, f ,indent=4, default=str)
 
 def int16_to_float32(x):
     return (x / 32767.).astype(np.float32)
@@ -207,7 +209,7 @@ def prepprocess_audio(track, ofs, rfs, mono_type = "mix"):
         track = track[:, 0]
     # track [n_sample]
     if ofs != rfs:
-        track = librosa.resample(track, ofs, rfs)
+        track = librosa.resample(track, orig_sr=ofs, target_sr=rfs)
     return track
 
 def init_hier_head(class_map, num_class):
